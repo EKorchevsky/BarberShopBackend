@@ -8,6 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: SSH into EC2 and deploy
         uses: appleboy/ssh-action@master
@@ -16,7 +17,7 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd BarbershopBackend
+            cd BarberShopBackend
             git pull origin main
             
             echo "${{ secrets.ENV_FILE }}" > .env
