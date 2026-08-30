@@ -1,0 +1,27 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into EC2 and deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd BarbershopBackend
+            git pull origin main
+            
+            echo "${{ secrets.ENV_FILE }}" > .env
+            
+            sudo docker build -t my-backend .
+            sudo docker stop backend-app || true
+            sudo docker rm backend-app || true
+            sudo docker run -d --name backend-app -p 8000:8000 --env-file .env my-backend

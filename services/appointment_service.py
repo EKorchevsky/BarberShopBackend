@@ -2,6 +2,7 @@ from datetime import date as date_type, datetime, time, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import BackgroundTasks, HTTPException
@@ -91,31 +92,65 @@ class AppointmentService:
 
         return slots
 
-    async def create_appointment(self, data: AppointmentCreate, background_tasks: BackgroundTasks) -> Appointment:
+    async def create_appointment(
+            self,
+            data: AppointmentCreate,
+            background_tasks: BackgroundTasks,
+    ) -> Appointment:
+
         service, barber = await self._get_service_with_barber(data.service_id)
 
         start_at = data.start_at
+
         if start_at.tzinfo is None:
             start_at = start_at.replace(tzinfo=timezone.utc)
-        end_at = start_at + timedelta(minutes=service.duration_minutes)
+
+        end_at = start_at + timedelta(
+            minutes=service.duration_minutes + BUFFER_MINUTES
+        )
 
         if start_at <= datetime.now(timezone.utc):
-            raise HTTPException(status_code=400, detail="Cannot book a slot in the past")
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot book a slot in the past",
+            )
 
         if await self._is_day_off(barber.id, start_at.date()):
-            raise HTTPException(status_code=400, detail="Barber is not working on this day")
+            raise HTTPException(
+                status_code=400,
+                detail="Barber is not working on this day",
+            )
 
-        working_hours = await self._get_working_hours(barber.id, start_at.weekday())
+        working_hours = await self._get_working_hours(
+            barber.id,
+            start_at.weekday(),
+        )
+
         if not working_hours or not working_hours.is_working:
-            raise HTTPException(status_code=400, detail="Barber is not working on this day")
-        if start_at.time() < working_hours.start_time or end_at.time() > working_hours.end_time:
-            raise HTTPException(status_code=400, detail="Selected time is outside working hours")
+            raise HTTPException(
+                status_code=400,
+                detail="Barber is not working on this day",
+            )
 
-        overlapping = await self._get_confirmed_appointments(barber.id, start_at, end_at)
+        if (
+                start_at.time() < working_hours.start_time
+                or end_at.time() > working_hours.end_time
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Selected time is outside working hours",
+            )
+
+        overlapping = await self._get_confirmed_appointments(
+            barber.id,
+            start_at,
+            end_at,
+        )
+
         if self._conflicts(start_at, end_at, overlapping):
             raise HTTPException(
                 status_code=409,
-                detail="This time slot is already booked (a 10-minute buffer is required between appointments)",
+                detail="This time slot is already booked",
             )
 
         appointment = Appointment(
@@ -128,11 +163,28 @@ class AppointmentService:
             end_at=end_at,
             status=AppointmentStatus.CONFIRMED,
         )
+
         self.db.add(appointment)
-        await self.db.commit()
+
+        try:
+            await self.db.commit()
+
+        except IntegrityError:
+            await self.db.rollback()
+
+            raise HTTPException(
+                status_code=409,
+                detail="This time slot was booked by another client",
+            )
+
         await self.db.refresh(appointment)
 
-        background_tasks.add_task(notification_service.send_appointment_confirmation, appointment, service, barber)
+        background_tasks.add_task(
+            notification_service.send_appointment_confirmation,
+            appointment,
+            service,
+            barber,
+        )
 
         return appointment
 
