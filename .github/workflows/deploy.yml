@@ -22,7 +22,5 @@ jobs:
             
             echo "${{ secrets.ENV_FILE }}" > .env
             
-            sudo docker build -t my-backend .
-            sudo docker stop backend-app || true
-            sudo docker rm backend-app || true
-            sudo docker run -d --name backend-app -p 8000:8000 --env-file .env my-backend
+            sudo docker compose down
+            sudo docker compose up -d --build
