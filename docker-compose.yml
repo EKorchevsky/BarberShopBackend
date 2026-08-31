@@ -23,11 +23,46 @@ services:
       - .env
     environment:
       POSTGRES_URL: postgresql+asyncpg://postgres:postgres@db:5432/Barbershop
-    ports:
-      - "8000:8000"
+      # Переменные для автоматического Nginx и SSL
+      VIRTUAL_HOST: 13.48.58.81.nip.io
+      VIRTUAL_PORT: 8000
+      LETSENCRYPT_HOST: 13.48.58.81.nip.io
+      LETSENCRYPT_EMAIL: tvoi.realniy.email@gmail.com # Впиши сюда свой email, туда придет инфа если лимит исчерпан
+    expose:
+      - "8000" # Открываем порт для Nginx внутри сети Докера (ports наружу больше не нужны)
     depends_on:
       db:
         condition: service_healthy
 
+  nginx:
+    image: nginxproxy/nginx-proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - conf:/etc/nginx/conf.d
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - certs:/etc/nginx/certs:ro
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+
+  letsencrypt:
+    image: nginxproxy/acme-companion
+    restart: always
+    environment:
+      NGINX_PROXY_CONTAINER: nginx
+    volumes:
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - certs:/etc/nginx/certs:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - nginx
+
 volumes:
   pgdata:
+  conf:
+  vhost:
+  html:
+  certs:
